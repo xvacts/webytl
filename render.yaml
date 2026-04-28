@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: youtube-downloader
+    runtime: python
+    repo: https://github.com/你的用户名/youtube-web-downloader   # 改成你的仓库
+    branch: main
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+    plan: free          # 改成 starter 或 standard 更稳定

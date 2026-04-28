@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube 下载工具 - Web版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" />
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; }
+    .log-area { font-family: ui-monospace, monospace; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+  <div class="max-w-3xl mx-auto p-4 md:p-6">
+    <h1 class="text-3xl font-bold text-center mb-8 text-red-500">YouTube 下载工具</h1>
+
+    <!-- 保存路径（浏览器限制，只能建议下载目录） -->
+    <div class="bg-gray-900 p-4 rounded-xl mb-6">
+      <div class="flex items-center gap-3">
+        <i class="fas fa-folder text-yellow-400"></i>
+        <span class="font-medium">下载后将保存到手机「文件」App</span>
+      </div>
+    </div>
+
+    <!-- Cookie -->
+    <div class="bg-gray-900 p-4 rounded-xl mb-6">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="useCookie" class="w-5 h-5 accent-red-500" />
+        <span>使用 Cookie 登录（推荐下载会员/私有视频）</span>
+      </label>
+      <button onclick="importCookie()" 
+              class="mt-3 px-5 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2">
+        <i class="fas fa-upload"></i> 导入 Cookie 文件 (.txt 或 .json)
+      </button>
+      <p id="cookieStatus" class="text-sm text-gray-400 mt-2"></p>
+    </div>
+
+    <!-- 输入区 -->
+    <div class="bg-gray-900 p-5 rounded-2xl mb-6">
+      <div class="mb-4">
+        <label class="block text-sm mb-2 font-medium">视频 / 播放列表链接（支持多行）</label>
+        <textarea id="urls" rows="5"
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:border-red-500"
+          placeholder="https://www.youtube.com/watch?v=..."></textarea>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm mb-2 font-medium">质量</label>
+          <select id="quality" class="w-full bg-gray-800 border border-gray-700 rounded-xl p-3 focus:outline-none focus:border-red-500">
+            <option value="最高质量（推荐）">最高质量（推荐）</option>
+            <option value="1080p（或更低）">1080p（或更低）</option>
+            <option value="720p（或更低）">720p（或更低）</option>
+            <option value="480p（或更低）">480p（或更低）</option>
+            <option value="最小体积（适合流量少）">最小体积（适合流量少）</option>
+            <option value="仅音频（MP3 192kbps）">仅音频（MP3 192kbps）</option>
+          </select>
+        </div>
+
+        <div class="flex items-end">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="playlist" class="w-5 h-5 accent-red-500" />
+            <span class="text-sm">下载整个播放列表 / 频道</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="flex gap-4 mb-6">
+      <button onclick="startDownload()" id="startBtn"
+        class="flex-1 bg-red-600 hover:bg-red-700 py-4 rounded-2xl font-bold text-lg transition">
+        开始下载
+      </button>
+      <button onclick="cancelDownload()" id="cancelBtn" disabled
+        class="flex-1 bg-gray-700 hover:bg-gray-600 py-4 rounded-2xl font-bold text-lg transition">
+        取消
+      </button>
+    </div>
+
+    <!-- 状态 & 进度 -->
+    <div class="bg-gray-900 p-5 rounded-2xl mb-6">
+      <div id="status" class="font-medium text-lg mb-3">就绪</div>
+      <div class="w-full bg-gray-700 h-3 rounded-full overflow-hidden">
+        <div id="progressBar" class="h-full bg-red-500 w-0 transition-all"></div>
+      </div>
+      <div id="progressText" class="text-right text-sm mt-1 text-gray-400">0%</div>
+    </div>
+
+    <!-- 当前文件 -->
+    <div id="currentFile" class="bg-gray-900 p-4 rounded-xl mb-6 hidden">
+      <span class="text-sm text-gray-400">正在下载：</span>
+      <span id="fileName" class="font-medium"></span>
+    </div>
+
+    <!-- 日志区域 -->
+    <div class="bg-gray-900 rounded-2xl overflow-hidden">
+      <div class="px-5 py-3 border-b border-gray-700 font-medium flex items-center gap-2">
+        <i class="fas fa-terminal"></i> 实时日志
+      </div>
+      <div id="logArea" class="log-area h-80 overflow-y-auto p-5 text-sm text-gray-300 bg-black/50 whitespace-pre-wrap"></div>
+    </div>
+
+    <div class="text-center text-xs text-gray-500 mt-8">
+      iOS 用户建议保持 Safari 前台 • 大文件推荐使用 Wi-Fi
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let currentTaskId = null;
+    let cookieFilePath = null;
+
+    function appendLog(msg) {
+      const log = document.getElementById('logArea');
+      const time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
+      log.innerHTML += `[${time}] ${msg}<br>`;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function connectWebSocket(taskId) {
+      if (ws) ws.close();
+      ws = new WebSocket(`ws://${location.host}/ws/${taskId}`);
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'log') {
+          appendLog(data.message);
+        } else if (data.type === 'progress') {
+          document.getElementById('progressBar').style.width = data.percent + '%';
+          document.getElementById('progressText').textContent = data.percent + '%';
+        } else if (data.type === 'status') {
+          document.getElementById('status').textContent = data.message;
+        } else if (data.type === 'current_file') {
+          document.getElementById('currentFile').classList.remove('hidden');
+          document.getElementById('fileName').textContent = data.filename;
+        } else if (data.type === 'finished') {
+          document.getElementById('startBtn').disabled = false;
+          document.getElementById('cancelBtn').disabled = true;
+          if (data.download_url) {
+            appendLog(`下载完成！<a href="${data.download_url}" class="text-red-400 underline" target="_blank">点击此处下载文件</a>`);
+          }
+        }
+      };
+
+      ws.onclose = () => console.log('WebSocket 已断开');
+    }
+
+    async function importCookie() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.txt,.json';
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch('/upload_cookie', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+          cookieFilePath = data.path;
+          document.getElementById('cookieStatus').textContent = `已加载：${file.name}`;
+          appendLog(`Cookie 文件已上传：${file.name}`);
+        }
+      };
+      input.click();
+    }
+
+    async function startDownload() {
+      const urlsText = document.getElementById('urls').value.trim();
+      if (!urlsText) return alert('请输入链接');
+
+      const urls = urlsText.split('\n').map(u => u.trim()).filter(u => u.startsWith('http'));
+
+      const quality = document.getElementById('quality').value;
+      const playlist = document.getElementById('playlist').checked;
+      const useCookie = document.getElementById('useCookie').checked;
+
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('cancelBtn').disabled = false;
+      document.getElementById('logArea').innerHTML = '';
+
+      appendLog('正在提交下载任务...');
+
+      const res = await fetch('/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          urls: urls,
+          quality: quality,
+          playlist: playlist,
+          use_cookie: useCookie,
+          cookie_path: cookieFilePath
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        currentTaskId = data.task_id;
+        connectWebSocket(data.task_id);
+        appendLog('任务已开始，等待 yt-dlp 处理...');
+      } else {
+        appendLog('错误：' + data.detail);
+        document.getElementById('startBtn').disabled = false;
+      }
+    }
+
+    function cancelDownload() {
+      if (ws) ws.close();
+      fetch(`/cancel/${currentTaskId}`, { method: 'POST' });
+      appendLog('已请求取消任务');
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('cancelBtn').disabled = true;
+    }
+
+    // 页面加载完成
+    window.onload = () => {
+      appendLog('YouTube 下载工具 Web 版已就绪');
+    };
+  </script>
+</body>
+</html>
